@@ -6,6 +6,7 @@
 package containerdshim
 
 import (
+	//"fmt"
 	"context"
 	"io/ioutil"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"github.com/containerd/typeurl"
 	ptypes "github.com/gogo/protobuf/types"
 	"github.com/opencontainers/runtime-spec/specs-go"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -74,10 +76,26 @@ func New(ctx context.Context, id string, publisher events.Publisher) (cdshim.Shi
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	//fmt.Println("\nTEST\n")
+	// create tracer
+	//tracer, err := katautils.CreateTracer("kata")
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	// test tracing - cm
+	//span := tracer.StartSpan("newtest")
+	//span.SetTag("subsystem", "runtime")
+	//ctx = opentracing.ContextWithSpan(ctx, span)
+	//span.Finish()
+	//katautils.StopTracing(ctx)
+
+
 	s := &service{
 		id:         id,
 		pid:        uint32(os.Getpid()),
 		ctx:        ctx,
+		//tracer:     tracer,
 		containers: make(map[string]*container),
 		events:     make(chan interface{}, chSize),
 		ec:         make(chan exit, bufferSize),
@@ -87,6 +105,7 @@ func New(ctx context.Context, id string, publisher events.Publisher) (cdshim.Shi
 	go s.processExits()
 
 	go s.forward(publisher)
+	logrus.Error("CM: NEW")
 
 	return s, nil
 }
@@ -109,6 +128,7 @@ type service struct {
 	// pid directly.
 	pid uint32
 
+	tracer     opentracing.Tracer
 	ctx        context.Context
 	sandbox    vc.VCSandbox
 	containers map[string]*container
@@ -123,6 +143,7 @@ type service struct {
 }
 
 func newCommand(ctx context.Context, containerdBinary, id, containerdAddress string) (*sysexec.Cmd, error) {
+	logrus.Error("CM: NEWCOMMAND")
 	ns, err := namespaces.NamespaceRequired(ctx)
 	if err != nil {
 		return nil, err
@@ -161,6 +182,7 @@ func newCommand(ctx context.Context, containerdBinary, id, containerdAddress str
 // StartShim willl start a kata shimv2 daemon which will implemented the
 // ShimV2 APIs such as create/start/update etc containers.
 func (s *service) StartShim(ctx context.Context, id, containerdBinary, containerdAddress string) (string, error) {
+	logrus.Error("CM: STARTSHIM")
 	bundlePath, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -170,6 +192,9 @@ func (s *service) StartShim(ctx context.Context, id, containerdBinary, container
 	if err != nil {
 		return "", err
 	}
+
+	//defer katautils.StopTracing(ctx)
+
 	if address != "" {
 		if err := cdshim.WriteAddress("address", address); err != nil {
 			return "", err
@@ -207,6 +232,8 @@ func (s *service) StartShim(ctx context.Context, id, containerdBinary, container
 		if err != nil {
 			cmd.Process.Kill()
 		}
+		//Stop tracing
+		katautils.StopTracing(ctx)
 	}()
 
 	// make sure to wait after start
@@ -221,6 +248,7 @@ func (s *service) StartShim(ctx context.Context, id, containerdBinary, container
 }
 
 func (s *service) forward(publisher events.Publisher) {
+	logrus.Error("CM: FORWARD")
 	for e := range s.events {
 		ctx, cancel := context.WithTimeout(s.ctx, timeOut)
 		err := publisher.Publish(ctx, getTopic(e), e)
@@ -280,7 +308,7 @@ func (s *service) Cleanup(ctx context.Context) (_ *taskAPI.DeleteResponse, err e
 	//the returned response, thus here redirect the log to stderr in case there's
 	//any log output to stdout.
 	logrus.SetOutput(os.Stderr)
-
+	logrus.Error("CM: CLEANUP")
 	defer func() {
 		err = toGRPC(err)
 	}()
@@ -337,7 +365,31 @@ func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	logrus.Error("CM: CREATE")
+	//fmt.Println("CREATE")
+	/*if s.tracer != opentracing.Tracer(nil) {
+		span := s.tracer.StartSpan("Create")
+		defer span.Finish()
+		span.SetTag("subsystem", "runtime")
+		// Associate this root span with the context
+		ctx = opentracing.ContextWithSpan(ctx, span)
+		fmt.Println("\n\nNOT NIL\n\n")
+	} else {
+		logrus.Error("CM: Create couldn't get tracer!?")
+		fmt.Println("\n\nNIL\n\n")
+	}*/
+	// TRACER TEST
+	//span := s.tracer.StartSpan("Create")
+	//span, _ := katautils.Trace(ctx, "Create")
+	//span.SetTag("subsystem", "runtime")
+	//ctx = opentracing.ContextWithSpan(ctx, span)
+	//span.Finish()
+
 	var c *container
+
+	//span2, ctx := opentracing.StartSpanFromContext(ctx, "testing kata")
+	//span2.SetTag("subsystem", "testing")
+	//span2.Finish()
 
 	c, err = create(ctx, s, r)
 	if err != nil {
@@ -375,6 +427,19 @@ func (s *service) Start(ctx context.Context, r *taskAPI.StartRequest) (_ *taskAP
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	logrus.Error("CM: START")
+	/*fmt.Println("START")
+	if s.tracer != opentracing.Tracer(nil) {
+		span := s.tracer.StartSpan("Start")
+		defer span.Finish()
+		span.SetTag("subsystem", "runtime")
+		// Associate this root span with the context
+		ctx = opentracing.ContextWithSpan(ctx, span)
+		fmt.Println("NOT NIL")
+	} else {
+		fmt.Println("NIL")
+	}*/
 
 	c, err := s.getContainer(r.ID)
 	if err != nil {
@@ -421,6 +486,15 @@ func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (_ *task
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	logrus.Error("CM: DELETE")
+	/*if s.tracer != opentracing.Tracer(nil) {
+		span := s.tracer.StartSpan("Delete")
+		defer span.Finish()
+		span.SetTag("subsystem", "runtime")
+		// Associate this root span with the context
+		ctx = opentracing.ContextWithSpan(ctx, span)
+	}*/
 
 	c, err := s.getContainer(r.ID)
 	if err != nil {
@@ -469,6 +543,15 @@ func (s *service) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (_ *p
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	logrus.Error("CM: EXEC")
+	/*if s.tracer != opentracing.Tracer(nil) {
+		span := s.tracer.StartSpan("Exec")
+		defer span.Finish()
+		span.SetTag("subsystem", "runtime")
+		// Associate this root span with the context
+		ctx = opentracing.ContextWithSpan(ctx, span)
+	}*/
+
 	c, err := s.getContainer(r.ID)
 	if err != nil {
 		return nil, err
@@ -501,6 +584,16 @@ func (s *service) ResizePty(ctx context.Context, r *taskAPI.ResizePtyRequest) (_
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: RESIZEPTY")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("ResizePty")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
+
 
 	c, err := s.getContainer(r.ID)
 	if err != nil {
@@ -535,6 +628,30 @@ func (s *service) State(ctx context.Context, r *taskAPI.StateRequest) (_ *taskAP
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: STATE")
+	// TESTING TRACE CREATION
+	// create tracer
+        tracer, err := katautils.CreateTracer("kata")
+        if err != nil {
+                return nil, err
+        }
+	opentracing.SetGlobalTracer(tracer)
+        //if s.tracer != opentracing.Tracer(nil) {
+        if tracer != opentracing.Tracer(nil) {
+                //span := s.tracer.StartSpan("State")
+                span := tracer.StartSpan("State")
+                //defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+		logrus.Error("TRACER WAS NOT NIL")
+		span.Finish()
+        } else {
+		logrus.Error("TRACER WAS NIL")
+	}
+	katautils.StopTracing(ctx)
+
 
 	c, err := s.getContainer(r.ID)
 	if err != nil {
@@ -584,6 +701,15 @@ func (s *service) Pause(ctx context.Context, r *taskAPI.PauseRequest) (_ *ptypes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+        logrus.Error("CM: PAUSE")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Pause")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
+
 	c, err := s.getContainer(r.ID)
 	if err != nil {
 		return nil, err
@@ -618,6 +744,15 @@ func (s *service) Resume(ctx context.Context, r *taskAPI.ResumeRequest) (_ *ptyp
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+        logrus.Error("CM: RESUME")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Resume")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
+
 	c, err := s.getContainer(r.ID)
 	if err != nil {
 		return nil, err
@@ -649,6 +784,19 @@ func (s *service) Kill(ctx context.Context, r *taskAPI.KillRequest) (_ *ptypes.E
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: KILL")
+	//fmt.Println("KILL")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Kill")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+		//fmt.Println("NOT NIL")
+        } else {
+		//fmt.Println("NIL")
+	}*/
 
 	signum := syscall.Signal(r.Signal)
 
@@ -701,6 +849,18 @@ func (s *service) Pids(ctx context.Context, r *taskAPI.PidsRequest) (_ *taskAPI.
 		err = toGRPC(err)
 	}()
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logrus.Error("CM: PIDS")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Pids")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
+
 	pInfo := task.ProcessInfo{
 		Pid: s.pid,
 	}
@@ -719,6 +879,15 @@ func (s *service) CloseIO(ctx context.Context, r *taskAPI.CloseIORequest) (_ *pt
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: CLOSEIO")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("CloseIO")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
 
 	c, err := s.getContainer(r.ID)
 	if err != nil {
@@ -753,6 +922,18 @@ func (s *service) Checkpoint(ctx context.Context, r *taskAPI.CheckpointTaskReque
 		err = toGRPC(err)
 	}()
 
+        s.mu.Lock()
+        defer s.mu.Unlock()
+
+        logrus.Error("CM: CHECKPOINT")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Checkpoint")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
+
 	return nil, errdefs.ToGRPCf(errdefs.ErrNotImplemented, "service Checkpoint")
 }
 
@@ -764,6 +945,15 @@ func (s *service) Connect(ctx context.Context, r *taskAPI.ConnectRequest) (_ *ta
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: CONNECT")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Connect")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
 
 	return &taskAPI.ConnectResponse{
 		ShimPid: s.pid,
@@ -778,6 +968,20 @@ func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (_ *
 	}()
 
 	s.mu.Lock()
+
+        logrus.Error("CM: SHUTDOWN")
+	//fmt.Println("SHUTDOWN")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Shutdown")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+		fmt.Println("NOT NIL")
+        } else {
+		fmt.Println("NIL")
+	}*/
+
 	if len(s.containers) != 0 {
 		s.mu.Unlock()
 		return empty, nil
@@ -800,6 +1004,15 @@ func (s *service) Stats(ctx context.Context, r *taskAPI.StatsRequest) (_ *taskAP
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: STATS")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Stats")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
 
 	c, err := s.getContainer(r.ID)
 	if err != nil {
@@ -824,6 +1037,15 @@ func (s *service) Update(ctx context.Context, r *taskAPI.UpdateTaskRequest) (_ *
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+        logrus.Error("CM: UPDATE")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Update")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
 
 	var resources *specs.LinuxResources
 	v, err := typeurl.UnmarshalAny(r.Resources)
@@ -850,6 +1072,15 @@ func (s *service) Wait(ctx context.Context, r *taskAPI.WaitRequest) (_ *taskAPI.
 	defer func() {
 		err = toGRPC(err)
 	}()
+
+        logrus.Error("CM: WAIT")
+        /*if s.tracer != opentracing.Tracer(nil) {
+                span := s.tracer.StartSpan("Wait")
+                defer span.Finish()
+                span.SetTag("subsystem", "runtime")
+                // Associate this root span with the context
+                ctx = opentracing.ContextWithSpan(ctx, span)
+        }*/
 
 	s.mu.Lock()
 	c, err := s.getContainer(r.ID)
