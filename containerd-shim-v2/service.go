@@ -549,6 +549,7 @@ func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (_ *task
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	defer katautils.StopTracing(s.ctx)
 	span := s.trace("Delete")
         if span != opentracing.Span(nil) {
                 defer span.Finish()
@@ -1020,7 +1021,7 @@ func (s *service) Shutdown(ctx context.Context, r *taskAPI.ShutdownRequest) (_ *
 	}
 	s.mu.Unlock()
 
-	katautils.StopTracing(ctx)
+	katautils.StopTracing(s.ctx)
 
 	s.cancel()
 
