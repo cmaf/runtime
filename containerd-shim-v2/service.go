@@ -88,6 +88,7 @@ func New(ctx context.Context, id string, publisher events.Publisher) (cdshim.Shi
 		}
 	}
 	// create span
+	// note - return context here causes future traces to be nested under New
 	span, ctx := trace(ctx, "New")
 	defer span.Finish()
 
@@ -372,6 +373,8 @@ func (s *service) Cleanup(ctx context.Context) (_ *taskAPI.DeleteResponse, err e
 // Create a new sandbox or container with the underlying OCI runtime
 func (s *service) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *taskAPI.CreateTaskResponse, err error) {
 	span, ctx := trace(s.ctx, "Create")
+	// reassigning ctx to s.ctx seems to make future traces nested under Create (or current span)
+	//s.ctx = ctx
 	defer span.Finish()
 
 	defer func() {
