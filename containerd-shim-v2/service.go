@@ -477,7 +477,7 @@ func (s *service) Start(ctx context.Context, r *taskAPI.StartRequest) (_ *taskAP
 
 // Delete the initial process and container
 func (s *service) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (_ *taskAPI.DeleteResponse, err error) {
-	defer katautils.StopTracing(s.ctx)
+	//defer katautils.StopTracing(s.ctx)
 	span, ctx := trace(s.ctx, "Delete")
 	defer span.Finish()
 
