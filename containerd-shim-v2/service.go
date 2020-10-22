@@ -80,12 +80,10 @@ func New(ctx context.Context, id string, publisher events.Publisher) (cdshim.Shi
 	}
 
 	// create tracer
-	tracer := opentracing.Tracer(nil)
-	if runtimeConfig.Trace {
-		tracer, err = katautils.CreateTracer("kata")
-		if err != nil {
-			return nil, err
-		}
+	var tracer opentracing.Tracer
+	tracer, err = katautils.CreateTracer("kata")
+	if err != nil {
+		return nil, err
 	}
 	// create span
 	// note - return context here causes future traces to be nested under New
