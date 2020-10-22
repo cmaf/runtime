@@ -909,7 +909,7 @@ func (s *service) Stats(ctx context.Context, r *taskAPI.StatsRequest) (_ *taskAP
 		return nil, err
 	}
 
-	data, err := marshalMetrics(s, c.id)
+	data, err := marshalMetrics(ctx, s, c.id)
 	if err != nil {
 		return nil, err
 	}

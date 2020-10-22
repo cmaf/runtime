@@ -6,6 +6,7 @@
 package containerdshim
 
 import (
+	"context"
 	"github.com/containerd/cgroups"
 	"github.com/containerd/typeurl"
 
@@ -13,8 +14,8 @@ import (
 	vc "github.com/kata-containers/runtime/virtcontainers"
 )
 
-func marshalMetrics(s *service, containerID string) (*google_protobuf.Any, error) {
-	stats, err := s.sandbox.StatsContainer(containerID)
+func marshalMetrics(ctx context.Context, s *service, containerID string) (*google_protobuf.Any, error) {
+	stats, err := s.sandbox.StatsContainerShimv2(ctx, containerID)
 	if err != nil {
 		return nil, err
 	}

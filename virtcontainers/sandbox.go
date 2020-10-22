@@ -783,6 +783,26 @@ func (s *Sandbox) findContainer(containerID string) (*Container, error) {
 	return nil, errors.Wrapf(vcTypes.ErrNoSuchContainer, "Could not find the container %q from the sandbox %q containers list",
 		containerID, s.id)
 }
+// test for shimv2 tracing
+func (s *Sandbox) findContainerShimv2(ctx context.Context, containerID string) (*Container, error) {
+	span, ctx := trace(ctx, "findContainerShimv2")
+	defer span.Finish()
+
+	if s == nil {
+		return nil, vcTypes.ErrNeedSandbox
+	}
+
+	if containerID == "" {
+		return nil, vcTypes.ErrNeedContainerID
+	}
+
+	if c, ok := s.containers[containerID]; ok {
+		return c, nil
+	}
+
+	return nil, errors.Wrapf(vcTypes.ErrNoSuchContainer, "Could not find the container %q from the sandbox %q containers list",
+		containerID, s.id)
+}
 
 // removeContainer removes a container from the containers list held by the
 // sandbox structure, based on a container ID.
@@ -1412,6 +1432,23 @@ func (s *Sandbox) UpdateContainer(containerID string, resources specs.LinuxResou
 func (s *Sandbox) StatsContainer(containerID string) (ContainerStats, error) {
 	// Fetch the container.
 	c, err := s.findContainer(containerID)
+	if err != nil {
+		return ContainerStats{}, err
+	}
+
+	stats, err := c.stats()
+	if err != nil {
+		return ContainerStats{}, err
+	}
+	return *stats, nil
+}
+// test for shimv2 tracing
+func (s *Sandbox) StatsContainerShimv2(ctx context.Context, containerID string) (ContainerStats, error) {
+	span, ctx := trace(ctx, "StatsContainerShimv2")
+	defer span.Finish()
+
+	// Fetch the container.
+	c, err := s.findContainerShimv2(ctx, containerID)
 	if err != nil {
 		return ContainerStats{}, err
 	}
